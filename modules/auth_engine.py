@@ -220,6 +220,15 @@ class AuthenticationEngine:
                 
                 logger.info(f"Face matched: {face_result.user_name}")
                 self._notify_state_change(session)
+                # If configured, unlock immediately on face match (face-only unlock)
+                try:
+                    from config.settings import FACE_UNLOCK_ON_MATCH
+                    if FACE_UNLOCK_ON_MATCH and getattr(self, 'door_controller', None):
+                        if self.door_controller.is_locked():
+                            logger.info(f"AuthEngine: auto-unlock on face match for {face_result.user_name}")
+                            self.door_controller.unlock(reason=f"Face recognized: {face_result.user_name}")
+                except Exception as e:
+                    logger.warning(f"AuthEngine auto-unlock failed: {e}")
             else:
                 # User not active
                 logger.warning(f"Face matched but user inactive: {face_result.user_name}")

@@ -27,6 +27,7 @@ from config.settings import (
     CONFIDENCE_THRESHOLD
 )
 from database.db_manager import FaceEncodingRepository, UserRepository, SystemLogRepository
+from modules.door_control import DoorController
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -140,6 +141,29 @@ class CameraManager:
             self.system_log.error("CameraManager", f"Camera start error: {str(e)}")
             self.stop()
             return False
+
+    def _open_picamera2_source(self):
+        """Try to open the Raspberry Pi camera via Picamera2 (libcamera)."""
+        try:
+            from picamera2 import Picamera2
+            picam = Picamera2()
+            config = picam.create_preview_configuration(
+                main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT), "format": "RGB888"}
+            )
+            picam.configure(config)
+            picam.start()
+            time.sleep(1.5)  # let auto-exposure settle
+            frame = picam.capture_array()
+            if frame is not None and frame.size > 0:
+                logger.info("Picamera2 opened and captured first frame")
+                return picam
+            picam.stop()
+            picam.close()
+        except ImportError:
+            logger.warning("picamera2 library not installed")
+        except Exception as e:
+            logger.warning(f"Picamera2 open failed: {e}")
+        return None
 
     def _open_usb_camera(self) -> Optional[cv2.VideoCapture]:
         """Open USB webcam with multiple backends and a retry-and-release strategy."""
@@ -328,6 +352,12 @@ class FaceRecognitionEngine:
         self.user_repo = UserRepository()
         self.system_log = SystemLogRepository()
 
+        # Door controller for optional auto-unlock on face match
+        try:
+            self.door_controller = DoorController()
+        except Exception:
+            self.door_controller = None
+
         self._known_encodings: List[np.ndarray] = []
         self._known_user_data: List[Dict] = []
         self._cache_lock = threading.Lock()
@@ -453,6 +483,17 @@ class FaceRecognitionEngine:
                     frame_with_box = self._draw_face_box(
                         frame, scaled_location, label, (0, 255, 0)
                     )
+
+                    # Optionally auto-unlock the door on face-only match (configurable)
+                    try:
+                        from config.settings import FACE_UNLOCK_ON_MATCH
+                        if FACE_UNLOCK_ON_MATCH and getattr(self, 'door_controller', None):
+                            if self.door_controller.is_locked():
+                                logger.info(f"Auto-unlock: triggering servo for {user_data['name']}")
+                                # Trigger unlock (uses DOOR_UNLOCK_DURATION from settings)
+                                self.door_controller.unlock(reason=f"Face recognized: {user_data['name']}")
+                    except Exception as e:
+                        logger.warning(f"Auto-unlock attempt failed: {e}")
 
                     return FaceResult(
                         status=FaceStatus.FACE_MATCHED,

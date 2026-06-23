@@ -25,13 +25,17 @@ FACE_RECOGNITION_TOLERANCE = 0.45  # Lower = stricter matching (Euclidean distan
 FACE_DETECTION_MODEL = "hog"  # "hog" for CPU, "cnn" for GPU
 FACE_ENCODING_JITTERS = 1  # Higher = more accurate but slower
 
+# If true, a successful face-only match will automatically unlock the door.
+# WARNING: enabling this bypasses multi-factor auth if your system relies on fingerprint.
+FACE_UNLOCK_ON_MATCH = True
+
 # Fingerprint sensor settings
 FINGERPRINT_PORT = "COM3"  # Change based on your system
 FINGERPRINT_BAUD_RATE = 57600
 FINGERPRINT_TIMEOUT = 5  # seconds
 
 # Door control settings (servo motor)
-DOOR_SERVO_PIN = 17           # GPIO pin for servo signal (PWM)
+DOOR_SERVO_PIN = 18           # GPIO pin for servo signal (PWM) — set to GPIO18 (pin 12)
 DOOR_SERVO_OPEN_ANGLE = 90    # Servo angle when door is unlocked (degrees)
 DOOR_SERVO_CLOSED_ANGLE = 0   # Servo angle when door is locked (degrees)
 DOOR_UNLOCK_DURATION = 10     # seconds before auto-lock (was 5)
