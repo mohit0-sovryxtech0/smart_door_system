@@ -12,10 +12,16 @@ import gc
 import requests
 import time
 import sys
+import glob
+import os
+import io
+import contextlib
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any, Union
 from dataclasses import dataclass
 from enum import Enum
+
+os.environ['OPENCV_LOG_LEVEL'] = 'FATAL'
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import (
@@ -166,38 +172,42 @@ class CameraManager:
         return None
 
     def _open_usb_camera(self) -> Optional[cv2.VideoCapture]:
-        """Open USB webcam with multiple backends and a retry-and-release strategy."""
+        """Open USB webcam using discovered /dev/video* device paths."""
         backends = []
         v4l2 = getattr(cv2, 'CAP_V4L2', None)
         if v4l2 is not None:
             backends.append(v4l2)
         backends.append(cv2.CAP_ANY)
 
-        for candidate in [CAMERA_INDEX, '/dev/video0', '/dev/video1']:
+        devices = sorted(glob.glob('/dev/video*'))
+        if not devices:
+            logger.warning("No /dev/video* devices found")
+            return None
+
+        for device in devices:
             for backend in backends:
-                for attempt in range(2):
-                    logger.info(f"Trying USB camera candidate={candidate} backend={backend} (attempt {attempt+1})")
-                    try:
-                        cap = cv2.VideoCapture(candidate, backend)
-                        if not cap.isOpened():
-                            logger.warning(f"  Failed to open: candidate={candidate} backend={backend}")
-                            continue
+                logger.info(f"Trying USB camera {device} backend={backend}")
+                try:
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        cap = cv2.VideoCapture(device, backend)
+                    if not cap.isOpened():
+                        logger.warning(f"  Failed to open {device}")
+                        continue
 
-                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
-                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
-                        cap.set(cv2.CAP_PROP_BUFFERSIZE, CAMERA_BUFFER_SIZE)
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, CAMERA_BUFFER_SIZE)
 
-                        validated = self._validate(cap)
-                        if validated:
-                            logger.info(f"USB camera confirmed: candidate={candidate} backend={backend}")
-                            return cap
+                    if self._validate(cap):
+                        logger.info(f"USB camera confirmed: {device} backend={backend}")
+                        return cap
 
-                        logger.warning(f"  Read validation failed: candidate={candidate} backend={backend} — releasing and retrying")
-                        cap.release()
-                        del cap
+                    logger.warning(f"  Read validation failed for {device} — releasing")
+                    cap.release()
+                    del cap
 
-                    except Exception as e:
-                        logger.warning(f"  USB open attempt failed for {candidate}/{backend}: {e}")
+                except Exception as e:
+                    logger.warning(f"  USB open failed for {device}/{backend}: {e}")
 
         return None
 
@@ -220,22 +230,26 @@ class CameraManager:
         if not hasattr(cv2, 'CAP_GSTREAMER'):
             return None
 
+        import glob as _glob
+        _devices = sorted(_glob.glob('/dev/video*'))
+        _idx_fallback = CAMERA_INDEX if isinstance(CAMERA_INDEX, int) else 0
+
         pipelines = [
-            # libcamera (default on Raspberry Pi OS Bookworm)
-            f"libcamerasrc ! video/x-raw,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink",
-            # V4L2 BGR (most generic USB camera pipeline)
-            f"v4l2src device=/dev/video0 ! video/x-raw,format=BGR,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink",
-            # V4L2 YUY2 (common uncompressed USB format)
-            f"v4l2src device=/dev/video0 ! video/x-raw,format=YUY2,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink",
-            # V4L2 explicitly pointing at device node
-            f"v4l2src device={CAMERA_INDEX} ! video/x-raw,format=BGR,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink",
+            f"v4l2src device=/dev/video{_idx_fallback} ! video/x-raw,format=BGR,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink",
         ]
+        for dev in _devices:
+            pipelines.append(
+                f"v4l2src device={dev} ! video/x-raw,format=BGR,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink"
+            )
+            pipelines.append(
+                f"v4l2src device={dev} ! video/x-raw,format=YUY2,width={CAMERA_WIDTH},height={CAMERA_HEIGHT},framerate={CAMERA_FPS}/1 ! videoconvert ! appsink"
+            )
 
         for pipeline in pipelines:
             try:
                 cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
                 if cap.isOpened() and self._validate(cap):
-                    logger.info(f"GStreamer pipeline confirmed: {pipeline[:60]}...")
+                    logger.info(f"GStreamer pipeline confirmed: {pipeline[:80]}...")
                     return cap
                 cap.release()
             except Exception as e:
@@ -484,17 +498,6 @@ class FaceRecognitionEngine:
                         frame, scaled_location, label, (0, 255, 0)
                     )
 
-                    # Optionally auto-unlock the door on face-only match (configurable)
-                    try:
-                        from config.settings import FACE_UNLOCK_ON_MATCH
-                        if FACE_UNLOCK_ON_MATCH and getattr(self, 'door_controller', None):
-                            if self.door_controller.is_locked():
-                                logger.info(f"Auto-unlock: triggering servo for {user_data['name']}")
-                                # Trigger unlock (uses DOOR_UNLOCK_DURATION from settings)
-                                self.door_controller.unlock(reason=f"Face recognized: {user_data['name']}")
-                    except Exception as e:
-                        logger.warning(f"Auto-unlock attempt failed: {e}")
-
                     return FaceResult(
                         status=FaceStatus.FACE_MATCHED,
                         user_id=user_data['user_id'],
@@ -513,39 +516,6 @@ class FaceRecognitionEngine:
                         f"(tolerance={FACE_RECOGNITION_TOLERANCE}, "
                         f"conf_threshold={CONFIDENCE_THRESHOLD})"
                     )
-                    scaled_location = tuple(coord * 4 for coord in face_location)
-                    frame_with_box = self._draw_face_box(
-                        frame, scaled_location, "Unknown Face", (0, 0, 255)
-                    )
-                    return FaceResult(
-                        status=FaceStatus.UNKNOWN_FACE,
-                        face_location=scaled_location,
-                        frame=frame_with_box
-                    )
-
-                best_match_idx = np.argmin(face_distances)
-                best_distance = face_distances[best_match_idx]
-
-                if best_distance <= FACE_RECOGNITION_TOLERANCE:
-                    user_data = self._known_user_data[best_match_idx]
-                    confidence = 1.0 - best_distance
-                    scaled_location = tuple(coord * 4 for coord in face_location)
-
-                    label = f"{user_data['name']} ({confidence*100:.1f}%)"
-                    frame_with_box = self._draw_face_box(
-                        frame, scaled_location, label, (0, 255, 0)
-                    )
-
-                    return FaceResult(
-                        status=FaceStatus.FACE_MATCHED,
-                        user_id=user_data['user_id'],
-                        user_name=user_data['name'],
-                        employee_id=user_data['employee_id'],
-                        confidence=confidence,
-                        face_location=scaled_location,
-                        frame=frame_with_box
-                    )
-                else:
                     scaled_location = tuple(coord * 4 for coord in face_location)
                     frame_with_box = self._draw_face_box(
                         frame, scaled_location, "Unknown Face", (0, 0, 255)

@@ -1,13 +1,14 @@
 # Smart Door Security System
 
-An IoT-enabled multi-factor authentication door security system using face recognition and fingerprint verification.
+An IoT-enabled door security system using face recognition for entry authentication and ultrasonic proximity sensor for exit.
 
 ## Features
 
-- **Multi-Factor Authentication**: Access granted only when BOTH face AND fingerprint match the same user
-- **Real-time GUI**: Live camera preview with face detection, fingerprint status, and door state
+- **Face Recognition Entry**: Camera mounted outside door recognizes enrolled users for access
+- **Ultrasonic Exit**: Proximity sensor inside door triggers automatic exit unlock
+- **Real-time GUI**: Live camera preview with door state and auto-lock countdown
 - **Admin Web Dashboard**: User management, access logs, and system statistics
-- **Auto-lock Door**: Configurable auto-lock after a set duration
+- **Auto-lock Door**: Automatically relocks after 10 seconds
 - **Secure by Design**: Hashed passwords, encoded biometrics (not raw images), secure APIs
 - **24/7 Operation**: Designed for continuous operation with error handling and recovery
 
@@ -15,7 +16,8 @@ An IoT-enabled multi-factor authentication door security system using face recog
 
 - Python 3.8 or higher
 - Webcam (for face recognition)
-- Fingerprint sensor (optional - can run in simulation mode)
+- HC-SR04 Ultrasonic sensor for exit mode
+- Servo motor for door lock
 - Windows/Linux/Raspberry Pi
 
 ## Installation
@@ -62,7 +64,7 @@ The database is automatically created on first run. A default admin user is crea
 ### Start the Main Application (GUI)
 
 ```bash
-# Normal mode (requires camera and fingerprint sensor)
+# Normal mode (requires camera and sensors)
 python main.py
 
 # Simulation mode (no hardware required)
@@ -101,21 +103,22 @@ python web/app.py
 3. Go to Users → Add User
 4. Fill in employee details
 
-### Step 2: Enroll biometrics via command line
+### Step 2: Enroll face via command line
 
 ```bash
 # List all users
 python enroll_user.py --list
 
-# Enroll both face and fingerprint for user ID 1
-python enroll_user.py --user 1
-
-# Enroll only face
+# Enroll face for user ID 1
 python enroll_user.py --user 1 --face
-
-# Enroll only fingerprint (simulation mode)
-python enroll_user.py --user 1 --fp --sim
 ```
+
+Fingerprint enrollment is coming soon in a future update.
+
+## How It Works
+
+- **Entry Mode**: Camera detects faces. If a recognized face is matched, the door unlocks for 10 seconds then auto-locks.
+- **Exit Mode**: Ultrasonic sensor detects a person within 5cm. Door unlocks for 10 seconds then auto-locks.
 
 ## Project Structure
 
@@ -173,11 +176,8 @@ CAMERA_HEIGHT = 480
 # Face recognition
 FACE_RECOGNITION_TOLERANCE = 0.6  # Lower = stricter
 
-# Fingerprint sensor
-FINGERPRINT_PORT = "COM3"  # or "/dev/ttyUSB0" on Linux
-
 # Door settings
-DOOR_UNLOCK_DURATION = 5  # seconds
+DOOR_UNLOCK_DURATION = 10  # seconds
 
 # Web server
 WEB_HOST = "127.0.0.1"
@@ -186,25 +186,22 @@ WEB_PORT = 5000
 
 ## Hardware Setup (for Production)
 
-### Fingerprint Sensor (R307/R305)
+### Servo Motor (for door lock)
+- Signal → GPIO 18 (PWM pin)
 - VCC → 5V
 - GND → Ground
-- TX → RX (via USB-Serial adapter or GPIO)
-- RD → TX
 
-### Door Relay (for Raspberry Pi)
-- Signal → GPIO 17
+### Ultrasonic Sensor (HC-SR04)
 - VCC → 5V
+- Trig → GPIO 23
+- Echo → GPIO 24
 - GND → Ground
 
 ## Security Features
 
 1. **Password Hashing**: Admin passwords hashed with bcrypt
 2. **Biometric Security**: Face encodings stored, not raw images
-3. **Multi-Factor**: Requires BOTH face AND fingerprint
-4. **Same-User Verification**: Both biometrics must belong to same user
-5. **Account Lockout**: After 5 failed login attempts
-6. **Access Logging**: All attempts logged with timestamps
+3. **Access Logging**: All attempts logged with timestamps
 
 ## API Endpoints
 

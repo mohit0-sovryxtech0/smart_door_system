@@ -21,13 +21,10 @@ CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
 
 # Face recognition settings
-FACE_RECOGNITION_TOLERANCE = 0.45  # Lower = stricter matching (Euclidean distance on 128-d encodings)
+FACE_RECOGNITION_TOLERANCE = 0.55  # Euclidean distance threshold (lower = stricter)
 FACE_DETECTION_MODEL = "hog"  # "hog" for CPU, "cnn" for GPU
 FACE_ENCODING_JITTERS = 1  # Higher = more accurate but slower
-
-# If true, a successful face-only match will automatically unlock the door.
-# WARNING: enabling this bypasses multi-factor auth if your system relies on fingerprint.
-FACE_UNLOCK_ON_MATCH = True
+CONFIDENCE_THRESHOLD = 0.65  # Minimum confidence (1 - distance) for a valid face match
 
 # Fingerprint sensor settings
 FINGERPRINT_PORT = "COM3"  # Change based on your system
@@ -82,7 +79,6 @@ SENSOR_CONNECTION_TIMEOUT = 10  # seconds
 # Authentication settings
 AUTH_RETRY_ATTEMPTS = 3
 AUTH_RETRY_DELAY = 2  # seconds
-CONFIDENCE_THRESHOLD = 0.75  # Minimum confidence (1 - distance) for a valid face match
 
 # Door settings
 DOOR_STATE_CHECK_INTERVAL = 1  # seconds

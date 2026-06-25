@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 Smart Door Security System - Main Application
-Runs 24/7 with GUI showing camera preview, fingerprint status, and door state.
-Multi-factor authentication: Face + Fingerprint required for access.
+Runs 24/7 with GUI showing camera preview, sensor status, and door state.
+Both camera (entry) and ultrasonic (exit) sensors run simultaneously.
+Door unlocks on face match OR ultrasonic detection, auto-locks after 10 seconds.
 """
 
 import sys
@@ -32,6 +33,12 @@ except ImportError as e:
 
 import cv2
 
+try:
+    import RPi.GPIO as GPIO
+    RPI_GPIO_AVAILABLE = True
+except ImportError:
+    RPI_GPIO_AVAILABLE = False
+
 # Project imports
 from config.settings import (
     GUI_UPDATE_INTERVAL, GUI_WINDOW_WIDTH, GUI_WINDOW_HEIGHT
@@ -41,9 +48,6 @@ from database.db_manager import (
 )
 from modules.face_recognition_module import (
     FaceRecognitionEngine, FaceResult, FaceStatus
-)
-from modules.fingerprint_module import (
-    FingerprintManager, FingerprintResult, FingerprintStatus
 )
 from modules.door_control import DoorController, DoorState, DoorMonitor
 from modules.auth_engine import AuthState
@@ -58,6 +62,72 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+class UltrasonicSensor:
+    """HC-SR04 ultrasonic distance sensor driver for exit detection."""
+
+    def __init__(self, trigger_pin: int = 23, echo_pin: int = 24,
+                 threshold_cm: float = 5.0, simulation: bool = False):
+        self.trigger_pin = trigger_pin
+        self.echo_pin = echo_pin
+        self.threshold_cm = threshold_cm
+        self.simulation = simulation or not RPI_GPIO_AVAILABLE
+        self._running = False
+        self._proximate = False
+        self._lock = threading.Lock()
+        self._monitor_thread: Optional[threading.Thread] = None
+
+        if not self.simulation:
+            try:
+                GPIO.setwarnings(False)
+                GPIO.setup(self.trigger_pin, GPIO.OUT)
+                GPIO.setup(self.echo_pin, GPIO.IN)
+                GPIO.output(self.trigger_pin, False)
+                time.sleep(0.05)
+            except Exception as e:
+                logger.error(f"Ultrasonic sensor init failed: {e}")
+                self.simulation = True
+
+    def start(self):
+        self._running = True
+        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._monitor_thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._monitor_thread:
+            self._monitor_thread.join(timeout=2.0)
+
+    def _monitor_loop(self):
+        while self._running:
+            dist = self.measure_distance()
+            proximate = dist is not None and dist < self.threshold_cm
+            with self._lock:
+                self._proximate = proximate
+            time.sleep(0.1)
+
+    def measure_distance(self) -> Optional[float]:
+        if self.simulation:
+            return None
+        try:
+            GPIO.output(self.trigger_pin, True)
+            time.sleep(0.00001)
+            GPIO.output(self.trigger_pin, False)
+            pulse_start = time.time()
+            while GPIO.input(self.echo_pin) == 0:
+                pulse_start = time.time()
+            pulse_end = time.time()
+            while GPIO.input(self.echo_pin) == 1:
+                pulse_end = time.time()
+            duration = pulse_end - pulse_start
+            return round(duration * 17150, 2)
+        except Exception:
+            return None
+
+    def is_proximate(self) -> bool:
+        with self._lock:
+            return self._proximate
 
 
 class SmartDoorGUI:
@@ -82,14 +152,13 @@ class SmartDoorGUI:
 
         # Initialize components
         self.face_engine = FaceRecognitionEngine()
-        self.fingerprint_manager = FingerprintManager(simulation=True)  # Always run in simulation mode
         self.door_controller = DoorController(simulation=simulation)
         self.door_monitor = DoorMonitor(self.door_controller)
+        self.ultrasonic = UltrasonicSensor(simulation=simulation)
 
         # State variables
         self._running = False
         self._current_face_result: Optional[FaceResult] = None
-        self._current_fp_result: Optional[FingerprintResult] = None
         self._auth_state = AuthState.IDLE
         self._matched_face_user_id = None
         self._auth_start_time = None
@@ -97,10 +166,10 @@ class SmartDoorGUI:
         # GUI variables
         self.camera_image = None
         self.face_status_var = tk.StringVar(value="Initializing...")
-        self.fingerprint_status_var = tk.StringVar(value="Initializing...")
         self.auth_result_var = tk.StringVar(value="WAITING")
         self.door_status_var = tk.StringVar(value="Door Locked")
         self.door_timer_var = tk.StringVar(value="")
+        self.fingerprint_status_var = tk.StringVar(value="Waiting for Fingerprint")
         self.current_time_var = tk.StringVar()
 
         # Build GUI
@@ -135,7 +204,7 @@ class SmartDoorGUI:
         right_frame = ttk.Frame(content_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self._build_fingerprint_panel(right_frame)
+        self._build_sensor_panel(right_frame)
         self._build_auth_result_panel(right_frame)
         self._build_door_panel(right_frame)
 
@@ -214,39 +283,40 @@ class SmartDoorGUI:
         )
         self.face_status_label.pack(side=tk.LEFT)
 
-    def _build_fingerprint_panel(self, parent):
-        """Build the fingerprint status panel."""
-        fp_frame = tk.LabelFrame(
+    def _build_sensor_panel(self, parent):
+        """Build the sensor status panel (both entry and exit sensors active)."""
+        sensor_frame = tk.LabelFrame(
             parent,
-            text="Fingerprint Status",
+            text="Sensors Active",
             font=('Helvetica', 12, 'bold'),
             fg='#00d4ff',
             bg='#16213e',
             padx=15,
             pady=15
         )
-        fp_frame.pack(fill=tk.X, pady=(0, 10))
+        sensor_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Status indicator
-        self.fp_status_label = tk.Label(
-            fp_frame,
-            textvariable=self.fingerprint_status_var,
-            font=('Helvetica', 14, 'bold'),
-            fg='#ffcc00',
+        # Entry sensor status
+        self.entry_sensor_var = tk.StringVar(value="Camera: Ready (Entry)")
+        entry_label = tk.Label(
+            sensor_frame,
+            textvariable=self.entry_sensor_var,
+            font=('Helvetica', 10),
+            fg='#00ff88',
             bg='#16213e'
         )
-        self.fp_status_label.pack(pady=10)
+        entry_label.pack(anchor=tk.W, pady=2)
 
-        # Fingerprint icon canvas
-        self.fp_canvas = tk.Canvas(
-            fp_frame,
-            width=100,
-            height=100,
-            bg='#16213e',
-            highlightthickness=0
+        # Exit sensor status
+        self.exit_sensor_var = tk.StringVar(value="Ultrasonic: Ready (Exit)")
+        exit_label = tk.Label(
+            sensor_frame,
+            textvariable=self.exit_sensor_var,
+            font=('Helvetica', 10),
+            fg='#00d4ff',
+            bg='#16213e'
         )
-        self.fp_canvas.pack(pady=5)
-        self._draw_fingerprint_icon('#444444')
+        exit_label.pack(anchor=tk.W, pady=2)
 
     def _build_auth_result_panel(self, parent):
         """Build the authentication result panel."""
@@ -272,6 +342,25 @@ class SmartDoorGUI:
             pady=20
         )
         self.auth_result_label.pack(fill=tk.X, pady=10)
+
+        fingerprint_status_label = tk.Label(
+            auth_frame,
+            textvariable=self.fingerprint_status_var,
+            font=('Helvetica', 12),
+            fg='#ffffff',
+            bg='#333333'
+        )
+        fingerprint_status_label.pack(pady=(0, 10))
+
+        self.fp_canvas = tk.Canvas(
+            auth_frame,
+            width=100,
+            height=100,
+            bg='#333333',
+            highlightthickness=0
+        )
+        self.fp_canvas.pack()
+        self._draw_fingerprint_icon('#444444')
 
     def _build_door_panel(self, parent):
         """Build the door status panel."""
@@ -387,19 +476,12 @@ class SmartDoorGUI:
                 self.face_status_var.set("Camera Error")
                 self._log_activity("ERROR: Face recognition failed to start")
 
-            # Start fingerprint sensor
-            if self.fingerprint_manager.start():
-                self.fingerprint_status_var.set("Waiting for Fingerprint")
-                self._log_activity("Fingerprint sensor connected")
-            else:
-                # Fallback to simulation if connection fails
-                self.fingerprint_manager.set_simulation(True)
-                self.fingerprint_status_var.set("Sensor in Simulation Mode")
-                self._log_activity("Fingerprint sensor connection failed - using simulation")
-
             # Start door monitor
             self.door_monitor.add_callback(self._on_door_status_change)
             self.door_monitor.start()
+
+            # Start ultrasonic sensor for Exit detection
+            self.ultrasonic.start()
 
             self._running = True
 
@@ -413,23 +495,44 @@ class SmartDoorGUI:
             messagebox.showerror("Error", f"Failed to start systems: {e}")
 
     def _process_loop(self):
-        """Main processing loop - runs on GUI thread via after()."""
+        """Main processing loop - runs on GUI thread via after().
+
+        Both face recognition (entry) and ultrasonic sensor (exit) run simultaneously.
+        Door unlocks on face match OR ultrasonic detection, auto-locks after 10 seconds.
+        """
         if not self._running:
             return
 
         try:
-            # Process face recognition
+            # Always process face recognition (entry sensor)
             face_result = self.face_engine.process_frame()
             self._update_face_display(face_result)
+            self._process_entry_auth(face_result)
 
-            # Update authentication state machine
-            self._process_authentication(face_result)
+            # Always process ultrasonic sensor (exit sensor)
+            self._process_exit_auth()
 
         except Exception as e:
             logger.error(f"Process loop error: {e}")
 
-        # Schedule next iteration
         self.root.after(GUI_UPDATE_INTERVAL, self._process_loop)
+
+    def _process_entry_auth(self, face_result: FaceResult):
+        """Process entry-side authentication using face recognition."""
+        self._process_authentication(face_result)
+
+    def _process_exit_auth(self):
+        """Process exit-side authentication using the ultrasonic sensor."""
+        proximate = self.ultrasonic.is_proximate()
+        self.exit_sensor_var.set(
+            "Ultrasonic: Proximate" if proximate else "Ultrasonic: Ready (Exit)"
+        )
+
+        if proximate and self.door_controller.is_locked():
+            self.door_controller.unlock(reason="Exit sensor triggered")
+            self.auth_result_var.set("EXIT OPEN")
+            self.auth_result_label.config(bg='#004400', fg='#ffff00')
+            self._log_activity("Exit sensor triggered - door unlocked")
 
     def _update_face_display(self, face_result: FaceResult):
         """Update the camera display with face detection results."""
@@ -613,9 +716,9 @@ class SmartDoorGUI:
 
             # Stop all components
             self.door_monitor.stop()
-            self.door_controller.cleanup()
-            self.fingerprint_manager.stop()
+            self.ultrasonic.stop()
             self.face_engine.stop()
+            self.door_controller.cleanup()
 
             self.system_log.info("MainGUI", "System shutdown")
             logger.info("System shutdown")

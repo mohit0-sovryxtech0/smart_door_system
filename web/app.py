@@ -571,24 +571,21 @@ def api_validate_user():
     """
     data = request.get_json()
     user_id = data.get('user_id')
-    
+
     if not user_id:
         return jsonify({'valid': False, 'error': 'No user_id provided'})
-    
+
     user = user_repo.get_by_id(user_id)
-    
+
     if not user:
         return jsonify({'valid': False, 'error': 'User not found'})
-    
+
     if not user.get('is_active', False):
         return jsonify({'valid': False, 'error': 'User is disabled'})
-    
+
     if not user.get('face_enrolled', False):
         return jsonify({'valid': False, 'error': 'Face not enrolled'})
-    
-    if not user.get('fingerprint_enrolled', False):
-        return jsonify({'valid': False, 'error': 'Fingerprint not enrolled'})
-    
+
     return jsonify({
         'valid': True,
         'user': {

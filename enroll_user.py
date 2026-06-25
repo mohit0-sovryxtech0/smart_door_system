@@ -82,72 +82,31 @@ def enroll_face(user_id: int):
 
 
 def enroll_fingerprint(user_id: int, simulation: bool = False):
-    """Enroll fingerprint for a user."""
-    user_repo = UserRepository()
-    user = user_repo.get_by_id(user_id)
-    
-    if not user:
-        print(f"Error: User with ID {user_id} not found.")
-        return False
-    
-    print(f"\nEnrolling fingerprint for: {user['first_name']} {user['last_name']}")
-    
-    def progress_callback(message):
-        print(f"  {message}")
-    
-    fp_manager = FingerprintManager(simulation=simulation)
-    
-    if not fp_manager.start():
-        print("Error: Failed to connect to fingerprint sensor.")
-        return False
-    
-    try:
-        success, message, fp_id = fp_manager.enroll(
-            user_id=user_id,
-            finger_position='right_index',
-            callback=progress_callback
-        )
-        
-        if success:
-            print(f"\n✓ Success: {message}")
-            print(f"  Fingerprint ID: {fp_id}")
-            return True
-        else:
-            print(f"\n✗ Failed: {message}")
-            return False
-    finally:
-        fp_manager.stop()
+    """Enroll fingerprint for a user (Coming Soon - not yet implemented)."""
+    print("\nFingerprint enrollment is coming soon in a future update.")
+    print("Currently only face enrollment is active.\n")
+    return False
 
 
 def enroll_both(user_id: int, simulation: bool = False):
-    """Enroll both face and fingerprint for a user."""
+    """Enroll both face and fingerprint for a user (face only - fingerprint coming soon)."""
     print("\n" + "=" * 50)
-    print("BIOMETRIC ENROLLMENT")
+    print("BIOMETRIC ENROLLMENT (Face Only - Fingerprint Coming Soon)")
     print("=" * 50)
     
     # Enroll face
-    print("\n[1/2] Face Enrollment")
+    print("\n[1/1] Face Enrollment")
     print("-" * 30)
     face_success = enroll_face(user_id)
-    
-    # Enroll fingerprint
-    print("\n[2/2] Fingerprint Enrollment")
-    print("-" * 30)
-    fp_success = enroll_fingerprint(user_id, simulation)
     
     # Summary
     print("\n" + "=" * 50)
     print("ENROLLMENT SUMMARY")
     print("=" * 50)
     print(f"Face:        {'✓ Enrolled' if face_success else '✗ Failed'}")
-    print(f"Fingerprint: {'✓ Enrolled' if fp_success else '✗ Failed'}")
+    print(f"Fingerprint: ⏳ Coming Soon (not yet implemented)")
     
-    if face_success and fp_success:
-        print("\n✓ User is fully enrolled and can now access the door.")
-    else:
-        print("\n✗ Enrollment incomplete. User cannot access the door.")
-    
-    return face_success and fp_success
+    return face_success
 
 
 def main():

@@ -144,20 +144,20 @@ class EnrollmentGUI:
         ttk.Separator(left_panel, orient='horizontal').pack(fill='x', pady=(0, 10))
         ttk.Label(left_panel, text="Enrollment Options", style='SubHeader.TLabel').pack(anchor='w', pady=(0, 10))
 
-        # Option buttons
+# Option buttons
         self.enroll_face_btn = tk.Button(left_panel, text="Enroll Face Only",
-                                        font=self.button_font, bg=self.colors['secondary'],
-                                        fg='white', command=self.enroll_face_only,
-                                        cursor='hand2')
+                                         font=self.button_font, bg=self.colors['secondary'],
+                                         fg='white', command=self.enroll_face_only,
+                                         cursor='hand2')
         self.enroll_face_btn.pack(fill='x', pady=5)
 
-        self.enroll_fp_btn = tk.Button(left_panel, text="Enroll Fingerprint Only",
-                                      font=self.button_font, bg=self.colors['warning'],
-                                      fg='white', command=self.enroll_fingerprint_only,
-                                      cursor='hand2')
+        self.enroll_fp_btn = tk.Button(left_panel, text="Enroll Fingerprint (Coming Soon)",
+                                       font=self.button_font, bg=self.colors['warning'],
+                                       fg='white', command=self.enroll_fingerprint_only,
+                                       cursor='hand2', state=tk.DISABLED)
         self.enroll_fp_btn.pack(fill='x', pady=5)
 
-        self.enroll_both_btn = tk.Button(left_panel, text="Enroll Both (Recommended)",
+        self.enroll_both_btn = tk.Button(left_panel, text="Enroll Both (Coming Soon - Face Active)",
                                         font=self.button_font, bg=self.colors['success'],
                                         fg='white', command=self.enroll_both,
                                         cursor='hand2')
@@ -457,55 +457,48 @@ Instructions:
         if not user:
             messagebox.showerror("Error", "Selected user not found.")
             return False
-        
+
         return True
-    
+
     def enroll_face_only(self):
         """Start face-only enrollment."""
         if not self.validate_selection():
             return
-        
+
         user = self.user_repo.get_by_id(self.selected_user_id)
         message = f"Start face enrollment for {user['first_name']} {user['last_name']}?"
-        
+
         if messagebox.askyesno("Confirm Enrollment", message):
             self.start_enrollment_thread(self.enroll_face_process)
-    
+
     def enroll_fingerprint_only(self):
-        """Start fingerprint-only enrollment."""
-        if not self.validate_selection():
-            return
-        
-        user = self.user_repo.get_by_id(self.selected_user_id)
-        message = f"Start fingerprint enrollment for {user['first_name']} {user['last_name']}?"
-        
-        if messagebox.askyesno("Confirm Enrollment", message):
-            self.start_enrollment_thread(self.enroll_fingerprint_process)
-    
+        """Start fingerprint-only enrollment (coming soon)."""
+        messagebox.showinfo("Coming Soon", "Fingerprint enrollment will be available in a future update.\nCurrently only face enrollment is active.")
+
     def enroll_both(self):
-        """Start both face and fingerprint enrollment."""
+        """Start both face and fingerprint enrollment (face only)."""
         if not self.validate_selection():
             return
-        
+
         user = self.user_repo.get_by_id(self.selected_user_id)
-        message = f"Start full enrollment (face + fingerprint) for {user['first_name']} {user['last_name']}?"
-        
+        message = f"Start face enrollment for {user['first_name']} {user['last_name']}?\n\nFingerprint enrollment is coming soon."
+
         if messagebox.askyesno("Confirm Enrollment", message):
             self.start_enrollment_thread(self.enroll_both_process)
-    
+
     def start_enrollment_thread(self, process_function):
         """Start enrollment in a separate thread."""
         if self.enrollment_thread and self.enrollment_thread.is_alive():
             messagebox.showwarning("Warning", "Enrollment already in progress.")
             return
-        
+
         self.stop_enrollment = False
         self.progress_var.set(0)
         self.log_message("Starting enrollment process...")
-        
+
         self.enrollment_thread = threading.Thread(target=process_function, daemon=True)
         self.enrollment_thread.start()
-    
+
     def enroll_face_process(self):
         """Process for face enrollment."""
         # Reset dot indicator and activate face-detection overlay
@@ -615,13 +608,11 @@ Instructions:
             messagebox.showerror("Error", f"An error occurred: {str(e)}")
     
     def enroll_both_process(self):
-        """Process for both face and fingerprint enrollment."""
+        """Process for both face and fingerprint enrollment (face only)."""
         try:
-            self.update_status("Starting full enrollment...", "blue")
-
-            # ── Step 1: Face enrollment ───────────────────────────────────────
+            # Step 1: Face enrollment
             self.log_message("=" * 50)
-            self.log_message("FACE ENROLLMENT")
+            self.log_message("FACE ENROLLMENT (Fingerprint coming soon)")
             self.log_message("=" * 50)
 
             # Activate face-detection overlay for the face phase
@@ -645,7 +636,7 @@ Instructions:
                 if self.stop_enrollment:
                     return
                 self.enrollment_last_sample_time = time.time()
-                self.progress_var.set((captured / 10) * 100)  # Face phase = 50 % of total
+                self.progress_var.set((captured / total) * 100)
                 self.root.after(0, lambda: self.update_sample_dots(captured, total))
                 self.root.after(0, lambda: self.update_status(
                     f"Face: {captured}/{total} samples...", "blue"))
@@ -665,41 +656,11 @@ Instructions:
             if face_success:
                 self.root.after(0, lambda: self.log_message(f"✓ Face enrollment successful: {face_message}"))
                 self.root.after(0, lambda: self.update_sample_dots(5, 5))
-                self.progress_var.set(50)
+                self.progress_var.set(100)
             else:
                 self.root.after(0, lambda: self.log_message(f"✗ Face enrollment failed: {face_message}"))
                 self.root.after(0, lambda: self.update_status("Face enrollment failed", "red"))
-            
-            # Step 2: Fingerprint enrollment
-            self.log_message("=" * 50)
-            self.log_message("FINGERPRINT ENROLLMENT")
-            self.log_message("=" * 50)
-            
-            if not self.fingerprint_manager.start():
-                self.root.after(0, lambda: self.update_status("Failed to connect to fingerprint sensor", "red"))
-                return
-            
-            def fp_progress_callback(message):
-                if self.stop_enrollment:
-                    return
-                self.progress_var.set(50 + (self.progress_var.get() / 2))
-                self.root.after(0, lambda: self.update_status(f"Fingerprint: {message}", "blue"))
-                self.root.after(0, lambda: self.log_message(f"  {message}"))
-            
-            fp_success, fp_message, fp_id = self.fingerprint_manager.enroll(
-                user_id=self.selected_user_id,
-                finger_position='right_index',
-                callback=fp_progress_callback
-            )
-            
-            if fp_success:
-                self.root.after(0, lambda: self.log_message(f"✓ Fingerprint enrollment successful: {fp_message}"))
-                self.root.after(0, lambda: self.log_message(f"  Fingerprint ID: {fp_id}"))
-                self.progress_var.set(100)
-            else:
-                self.root.after(0, lambda: self.log_message(f"✗ Fingerprint enrollment failed: {fp_message}"))
-                self.root.after(0, lambda: self.update_status("Fingerprint enrollment failed", "red"))
-            
+
             # Summary
             self.root.after(0, lambda: self.log_message("=" * 50))
             self.root.after(0, lambda: self.log_message("ENROLLMENT SUMMARY"))
@@ -707,17 +668,17 @@ Instructions:
             self.root.after(0, lambda: self.log_message(
                 f"Face:        {'✓ Enrolled' if face_success else '✗ Failed'}"))
             self.root.after(0, lambda: self.log_message(
-                f"Fingerprint: {'✓ Enrolled' if fp_success else '✗ Failed'}"))
-            
-            if face_success and fp_success:
-                self.root.after(0, lambda: self.update_status("Full enrollment completed successfully!", "green"))
-                self.root.after(0, lambda: messagebox.showinfo("Success", "Full enrollment completed successfully!\nUser is now fully enrolled."))
+                f"Fingerprint: ⏳ Coming Soon (not yet implemented)"))
+
+            if face_success:
+                self.root.after(0, lambda: self.update_status("Enrollment completed successfully!", "green"))
+                self.root.after(0, lambda: messagebox.showinfo("Success", "Face enrollment completed!\nFingerprint enrollment coming soon."))
             else:
-                self.root.after(0, lambda: self.update_status("Enrollment incomplete", "orange"))
-                self.root.after(0, lambda: messagebox.showwarning("Warning", "Enrollment incomplete. Some biometrics may have failed."))
-            
+                self.root.after(0, lambda: self.update_status("Enrollment failed", "red"))
+                self.root.after(0, lambda: messagebox.showerror("Error", "Enrollment failed."))
+
             self.root.after(0, self.load_users)
-            
+
         except Exception as e:
             self.root.after(0, lambda: self.update_status(f"Enrollment error: {str(e)}", "red"))
             self.root.after(0, lambda: self.log_message(f"Error: {str(e)}"))

@@ -77,6 +77,11 @@ class ServoController:
     Uses gpiozero.AngularServo when available (smooth, built-in PWM).
     Falls back to RPi.GPIO software PWM.
     Runs in simulation mode when neither library is present.
+
+    Vibration mitigation:
+    - Explicit pulse-width calibration for SG90/MG90S (0.5 ms … 2.5 ms)
+    - Settle delay after each move so the mechanical stop is reached cleanly
+    - Software-PWM step smoothing on RPi.GPIO path
     """
 
     def __init__(self, pin: int, open_angle: float, closed_angle: float,
@@ -89,6 +94,10 @@ class ServoController:
         self._servo = None
         self._pwm = None
         self._current_angle: Optional[float] = None
+        # SG90/MG90S standard pulse widths (seconds)
+        self._min_pulse = 0.0005
+        self._max_pulse = 0.0025
+        self._settle_delay = 0.2
 
         if not self.simulation:
             self._init_servo()
@@ -110,6 +119,8 @@ class ServoController:
                         min_angle=self.closed_angle,
                         max_angle=self.open_angle,
                         initial_angle=self.closed_angle,
+                        min_pulse_width=self._min_pulse,
+                        max_pulse_width=self._max_pulse,
                         pin_factory=factory,
                     )
                 except Exception:
@@ -118,17 +129,22 @@ class ServoController:
                         min_angle=self.closed_angle,
                         max_angle=self.open_angle,
                         initial_angle=self.closed_angle,
+                        min_pulse_width=self._min_pulse,
+                        max_pulse_width=self._max_pulse,
                     )
                 self._current_angle = self.closed_angle
                 logger.info(f"Servo initialised on GPIO {self.pin} via gpiozero")
 
             elif RPI_GPIO_AVAILABLE:
+                GPIO.setwarnings(False)
                 GPIO.setmode(GPIO.BCM)
                 GPIO.setup(self.pin, GPIO.OUT)
                 self._pwm = GPIO.PWM(self.pin, self.pwm_freq)
                 self._pwm.start(0)
                 self._current_angle = self.closed_angle
                 self._write_angle(self.closed_angle)
+                time.sleep(self._settle_delay)
+                self._pwm.ChangeDutyCycle(0)
                 logger.info(f"Servo initialised on GPIO {self.pin} via RPi.GPIO PWM")
 
         except Exception as e:
@@ -162,27 +178,33 @@ class ServoController:
         Move the servo to *angle* degrees.
 
         *angle* is clamped to [closed_angle, open_angle].
-        The servo steps in increments of *step* degrees so the motion is
-        smooth and does not slam the mechanism.
+        Direct movement to target angle for stable operation.
+
+        Vibration mitigation:
+        - gpiozero path uses calibrated pulse widths and a settle delay
+        - RPi.GPIO path sends direct PWM signal then stops to prevent buzz
         """
         angle = max(min(angle, self.open_angle), self.closed_angle)
-        start = self._current_angle if self._current_angle is not None else angle
         self._current_angle = angle
 
         if self.simulation:
-            logger.info(f"[SIM] Servo → {angle:.0f}°  (from {start:.0f}°)")
+            logger.info(f"[SIM] Servo → {angle:.0f}°  (from {angle:.0f}°)")
             return
 
         try:
             if GPIOZERO_AVAILABLE and self._servo is not None:
                 self._servo.angle = angle
-                time.sleep(0.4)   # give the servo time to reach position
+                time.sleep(self._settle_delay)
             elif RPI_GPIO_AVAILABLE and self._pwm is not None:
-                # Step-wise movement for smoother motion
-                direction = 1 if angle >= start else -1
-                for a in range(int(start), int(angle) + 1, int(step) * direction):
-                    self._write_angle(a)
-                    time.sleep(delay)
+                # Direct movement - no stepping to avoid vibration
+                duty = self._angle_to_duty(angle, self.pwm_freq)
+                self._pwm.ChangeDutyCycle(duty)
+                time.sleep(self._settle_delay)
+                # Stop PWM signal to prevent motor buzz/vibration
+                self._pwm.ChangeDutyCycle(0)
+                time.sleep(0.1)
+            else:
+                return
         except Exception as e:
             logger.error(f"Servo move error: {e}")
 
@@ -200,11 +222,14 @@ class ServoController:
             if GPIOZERO_AVAILABLE and self._servo is not None:
                 self._servo.close()
                 self._servo = None
-            if RPI_GPIO_AVAILABLE:
+            if RPI_GPIO_AVAILABLE and not self.simulation:
                 if self._pwm is not None:
                     self._pwm.stop()
                     self._pwm = None
-                GPIO.cleanup(self.pin)
+                try:
+                    GPIO.cleanup(self.pin)
+                except Exception:
+                    pass
             logger.info("Servo cleaned up")
         except Exception as e:
             logger.error(f"Servo cleanup error: {e}")
@@ -436,6 +461,12 @@ class DoorController:
         if self._auto_lock_timer:
             self._auto_lock_timer.cancel()
             self._auto_lock_timer = None
+
+        try:
+            if self._state != DoorState.LOCKED:
+                self._servo_ctrl.close()
+        except Exception:
+            pass
 
         self._servo_ctrl.cleanup()
 
