@@ -39,30 +39,20 @@ def _send_email_worker(frame=None):
 
     # Dynamically resolve receiver (recipient) email from admin page/profile
     recipient = None
-    sender_email = None
-    sender_password = None
     try:
         admin = admin_repo.get_by_username('admin')
-        if admin:
-            if admin.get('email'):
-                recipient = admin['email']
-                logger.info(f"Resolved recipient email from admin database: {recipient}")
-            if admin.get('sender_email'):
-                sender_email = admin['sender_email']
-                logger.info(f"Resolved sender email from admin database: {sender_email}")
-            if admin.get('sender_password'):
-                sender_password = admin['sender_password']
+        if admin and admin.get('email'):
+            recipient = admin['email']
+            logger.info(f"Resolved recipient email from admin database: {recipient}")
     except Exception as db_err:
-        logger.warning(f"Could not retrieve admin email/credentials from DB: {db_err}")
+        logger.warning(f"Could not retrieve admin email from DB: {db_err}")
 
     if not recipient:
         recipient = EMAIL_RECIPIENT
 
-    if not sender_email:
-        sender_email = SMTP_USERNAME
+    sender_email = SMTP_USERNAME
+    sender_password = SMTP_PASSWORD
 
-    if not sender_password:
-        sender_password = SMTP_PASSWORD
 
     # Check if configurations are set
     if not sender_email or not sender_password or not recipient:

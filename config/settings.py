@@ -100,8 +100,8 @@ AUTH_TIMEOUT = 30  # seconds to complete both authentications
 # Email notification settings for unknown face alerts
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
-SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "")
-SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-EMAIL_RECIPIENT = os.environ.get("EMAIL_RECIPIENT", "")
+SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "facialrecognitionandattendance@gmail.com")
+SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "awky zocc uvnq qzrd")
+EMAIL_RECIPIENT = os.environ.get("EMAIL_RECIPIENT", "waibhavm@gmail.com")
 UNKNOWN_FACE_EMAIL_THRESHOLD = 4
 EMAIL_COOLDOWN = 60  # seconds

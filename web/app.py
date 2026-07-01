@@ -458,19 +458,14 @@ def settings():
             return render_template('settings.html', admin=admin)
 
         try:
-            sender_email = request.form.get('sender_email', '').strip() or None
-            sender_password = request.form.get('sender_password', '').strip() or None
-            
             admin_repo.update_profile(
                 admin['id'], 
                 email=email, 
-                full_name=full_name,
-                sender_email=sender_email,
-                sender_password=sender_password
+                full_name=full_name
             )
             # Update session variables
             session['admin_name'] = full_name
-            system_log.info('AdminSettings', f"Admin profile updated: {admin['username']} (email={email}, sender={sender_email})")
+            system_log.info('AdminSettings', f"Admin profile updated: {admin['username']} (email={email})")
             flash('Settings updated successfully.', 'success')
             return redirect(url_for('settings'))
         except Exception as e:

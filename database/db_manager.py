@@ -154,17 +154,17 @@ class AdminRepository:
         )
         self.db.commit()
         
-    def update_profile(self, admin_id: int, email: str, full_name: str, 
-                       sender_email: str = None, sender_password: str = None) -> bool:
-        """Update admin profile details (email, full name, sender email, and sender password)."""
+    def update_profile(self, admin_id: int, email: str, full_name: str) -> bool:
+        """Update admin profile details (email and full name)."""
         self.db.execute(
             """UPDATE admin 
-               SET email = ?, full_name = ?, sender_email = ?, sender_password = ?, updated_at = ? 
+               SET email = ?, full_name = ?, updated_at = ? 
                WHERE id = ?""",
-            (email, full_name, sender_email, sender_password, datetime.now(), admin_id)
+            (email, full_name, datetime.now(), admin_id)
         )
         self.db.commit()
         return True
+
 
 
     
