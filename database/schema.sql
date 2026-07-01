@@ -8,11 +8,14 @@ CREATE TABLE IF NOT EXISTS admin (
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     full_name VARCHAR(100) NOT NULL,
+    sender_email VARCHAR(100) NULL,
+    sender_password VARCHAR(100) NULL,
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME NULL
 );
+
 
 -- Users table for people who can access the door
 CREATE TABLE IF NOT EXISTS users (

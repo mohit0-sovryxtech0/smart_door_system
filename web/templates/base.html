@@ -41,8 +41,15 @@
                     <span>Analytics</span>
                 </a>
             </li>
+            <li class="nav-item">
+                <a href="{{ url_for('settings') }}" class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </a>
+            </li>
         </ul>
         <div class="sidebar-footer">
+
             <div class="admin-info">
                 <i class="fas fa-user-shield"></i>
                 <span>{{ session.get('admin_name', 'Admin') }}</span>

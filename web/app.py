@@ -440,9 +440,50 @@ def analytics():
                           peak_hours=peak_hours)
 
 
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    """Admin settings/profile page where the receiver email can be entered."""
+    admin = admin_repo.get_by_id(session['admin_id'])
+    if not admin:
+        flash('Admin not found.', 'error')
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        full_name = request.form.get('full_name', '').strip()
+
+        if not email or not full_name:
+            flash('All fields are required.', 'error')
+            return render_template('settings.html', admin=admin)
+
+        try:
+            sender_email = request.form.get('sender_email', '').strip() or None
+            sender_password = request.form.get('sender_password', '').strip() or None
+            
+            admin_repo.update_profile(
+                admin['id'], 
+                email=email, 
+                full_name=full_name,
+                sender_email=sender_email,
+                sender_password=sender_password
+            )
+            # Update session variables
+            session['admin_name'] = full_name
+            system_log.info('AdminSettings', f"Admin profile updated: {admin['username']} (email={email}, sender={sender_email})")
+            flash('Settings updated successfully.', 'success')
+            return redirect(url_for('settings'))
+        except Exception as e:
+            flash(f'Error updating settings: {str(e)}', 'error')
+
+
+    return render_template('settings.html', admin=admin)
+
+
 # =====================
 # REST API Endpoints
 # =====================
+
 
 @app.route('/api/users', methods=['GET'])
 @api_login_required

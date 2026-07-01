@@ -16,7 +16,7 @@ import cv2
 from config.settings import (
     SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, EMAIL_RECIPIENT
 )
-from database.db_manager import SystemLogRepository
+from database.db_manager import SystemLogRepository, AdminRepository
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +35,38 @@ def send_unknown_face_alert_async(frame=None):
 def _send_email_worker(frame=None):
     """Worker function that connects to SMTP and sends the alert email."""
     system_log = SystemLogRepository()
+    admin_repo = AdminRepository()
+
+    # Dynamically resolve receiver (recipient) email from admin page/profile
+    recipient = None
+    sender_email = None
+    sender_password = None
+    try:
+        admin = admin_repo.get_by_username('admin')
+        if admin:
+            if admin.get('email'):
+                recipient = admin['email']
+                logger.info(f"Resolved recipient email from admin database: {recipient}")
+            if admin.get('sender_email'):
+                sender_email = admin['sender_email']
+                logger.info(f"Resolved sender email from admin database: {sender_email}")
+            if admin.get('sender_password'):
+                sender_password = admin['sender_password']
+    except Exception as db_err:
+        logger.warning(f"Could not retrieve admin email/credentials from DB: {db_err}")
+
+    if not recipient:
+        recipient = EMAIL_RECIPIENT
+
+    if not sender_email:
+        sender_email = SMTP_USERNAME
+
+    if not sender_password:
+        sender_password = SMTP_PASSWORD
 
     # Check if configurations are set
-    if not SMTP_USERNAME or not SMTP_PASSWORD or not EMAIL_RECIPIENT:
-        msg = "SMTP settings or recipient not configured. Alert email skipped."
+    if not sender_email or not sender_password or not recipient:
+        msg = "SMTP settings, credentials, or recipient not configured. Alert email skipped."
         logger.warning(msg)
         system_log.warning("EmailNotifier", msg)
         return
@@ -56,8 +84,8 @@ def _send_email_worker(frame=None):
     try:
         msg = MIMEMultipart()
         msg['Subject'] = subject
-        msg['From'] = SMTP_USERNAME
-        msg['To'] = EMAIL_RECIPIENT
+        msg['From'] = sender_email
+        msg['To'] = recipient
 
         msg.attach(MIMEText(body, 'plain'))
 
@@ -80,13 +108,15 @@ def _send_email_worker(frame=None):
         server.ehlo()
         server.starttls()
         server.ehlo()
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
-        server.sendmail(SMTP_USERNAME, EMAIL_RECIPIENT, msg.as_string())
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, recipient, msg.as_string())
         server.close()
 
-        success_msg = f"Security alert email sent successfully to {EMAIL_RECIPIENT}"
+        success_msg = f"Security alert email sent successfully to {recipient}"
         logger.info(success_msg)
         system_log.info("EmailNotifier", success_msg)
+
+
 
     except Exception as e:
         error_msg = f"Failed to send security alert email: {str(e)}"

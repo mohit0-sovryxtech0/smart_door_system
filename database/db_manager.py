@@ -72,10 +72,22 @@ class DatabaseManager:
             
             conn = self._get_connection()
             conn.executescript(schema)
+            
+            # Dynamically add sender_email and sender_password columns to admin table if they don't exist
+            try:
+                conn.execute("ALTER TABLE admin ADD COLUMN sender_email VARCHAR(100)")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE admin ADD COLUMN sender_password VARCHAR(100)")
+            except sqlite3.OperationalError:
+                pass
+                
             conn.commit()
             logger.info("Database initialized successfully")
         else:
             logger.error(f"Schema file not found: {schema_path}")
+
     
     def execute(self, query: str, params: tuple = ()) -> sqlite3.Cursor:
         """Execute a query and return cursor."""
@@ -141,6 +153,20 @@ class AdminRepository:
             (datetime.now(), datetime.now(), admin_id)
         )
         self.db.commit()
+        
+    def update_profile(self, admin_id: int, email: str, full_name: str, 
+                       sender_email: str = None, sender_password: str = None) -> bool:
+        """Update admin profile details (email, full name, sender email, and sender password)."""
+        self.db.execute(
+            """UPDATE admin 
+               SET email = ?, full_name = ?, sender_email = ?, sender_password = ?, updated_at = ? 
+               WHERE id = ?""",
+            (email, full_name, sender_email, sender_password, datetime.now(), admin_id)
+        )
+        self.db.commit()
+        return True
+
+
     
     def create_session(self, admin_id: int, token: str, expires_at: datetime, 
                        ip_address: str = None, user_agent: str = None) -> int:
